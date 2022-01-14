@@ -1,3 +1,4 @@
+import { AnalyzedQuery } from './analyzed_query';
 import { DuckDBConfig, DuckDBConnection, FileStatistics } from '.';
 import { CSVInsertOptions, JSONInsertOptions, ArrowInsertOptions } from './insert_options';
 import { ScriptTokens } from './tokens';
@@ -14,6 +15,7 @@ export interface DuckDBBindings {
 
     connect(): DuckDBConnection;
     disconnect(conn: number): void;
+    analyzeQuery(conn: number, text: string): AnalyzedQuery;
     runQuery(conn: number, text: string): Uint8Array;
     sendQuery(conn: number, text: string): Uint8Array;
     fetchQueryResults(conn: number): Uint8Array;

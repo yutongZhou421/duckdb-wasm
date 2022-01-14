@@ -1,4 +1,5 @@
 import * as arrow from 'apache-arrow';
+import { AnalyzedQuery } from './analyzed_query';
 import { DuckDBBindings } from './bindings_interface';
 import { CSVInsertOptions, JSONInsertOptions, ArrowInsertOptions } from './insert_options';
 
@@ -23,6 +24,11 @@ export class DuckDBConnection {
     /** Brave souls may use this function to consume the underlying connection id */
     public useUnsafe<R>(callback: (bindings: DuckDBBindings, conn: number) => R) {
         return callback(this._bindings, this._conn);
+    }
+
+    /** Analyzer a query */
+    public analyze(text: string): AnalyzedQuery {
+        return this._bindings.analyzeQuery(this._conn, text);
     }
 
     /** Run a query */

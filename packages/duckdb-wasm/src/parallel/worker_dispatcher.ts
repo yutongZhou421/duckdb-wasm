@@ -151,6 +151,19 @@ export abstract class AsyncDuckDBDispatcher implements Logger {
                     this._bindings.disconnect(request.data);
                     this.sendOK(request);
                     break;
+                case WorkerRequestType.ANALYZE_QUERY: {
+                    const result = this._bindings.analyzeQuery(request.data[0], request.data[1]);
+                    this.postMessage(
+                        {
+                            messageId: this._nextMessageId++,
+                            requestId: request.messageId,
+                            type: WorkerResponseType.ANALYZED_QUERY,
+                            data: result,
+                        },
+                        [],
+                    );
+                    break;
+                }
                 case WorkerRequestType.CREATE_PREPARED: {
                     const result = this._bindings.createPrepared(request.data[0], request.data[1]);
                     this.postMessage(

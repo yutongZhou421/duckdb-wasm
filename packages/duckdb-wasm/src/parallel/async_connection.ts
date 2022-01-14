@@ -1,4 +1,5 @@
 import * as arrow from 'apache-arrow';
+import { AnalyzedQuery } from '../bindings/analyzed_query';
 import { AsyncDuckDB } from './async_bindings';
 import { LogLevel, LogTopic, LogOrigin, LogEvent } from '../log';
 import { ArrowInsertOptions, CSVInsertOptions, JSONInsertOptions } from '../bindings/insert_options';
@@ -28,6 +29,11 @@ export class AsyncDuckDBConnection {
     /** Brave souls may use this function to consume the underlying connection id */
     public useUnsafe<R>(callback: (bindings: AsyncDuckDB, conn: number) => R) {
         return callback(this._bindings, this._conn);
+    }
+
+    /** Analyzer a query */
+    public analyze(text: string): Promise<AnalyzedQuery> {
+        return this._bindings.analyzeQuery(this._conn, text);
     }
 
     /** Run a query */
