@@ -32,6 +32,12 @@ extern "C" {
     async fn disconnect(this: &JsAsyncDuckDB, conn: ConnectionID) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(catch, method, js_name = "tokenize")]
     async fn tokenize(this: &JsAsyncDuckDB, text: &str) -> Result<JsValue, JsValue>;
+    #[wasm_bindgen(catch, method, js_name = "analyzeQuery")]
+    async fn analyze_query(
+        this: &JsAsyncDuckDB,
+        conn: ConnectionID,
+        text: &str,
+    ) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(catch, method, js_name = "runQuery")]
     async fn run_query(
         this: &JsAsyncDuckDB,
