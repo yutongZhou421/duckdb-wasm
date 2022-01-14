@@ -1,3 +1,4 @@
+import { AnalyzedQuery } from './analyzed_query';
 import { DuckDBModule, PThread } from './duckdb_module';
 import { DuckDBConfig } from './config';
 import { Logger } from '../log';
@@ -156,6 +157,16 @@ export abstract class DuckDBBindingsBase implements DuckDBBindings {
         }
     }
 
+    /** Analyze a query */
+    public analyzeQuery(conn: number, text: string): AnalyzedQuery {
+        const [s, d, n] = callSRet(this.mod, 'duckdb_web_query_analyze', ['number', 'string'], [conn, text]);
+        if (s !== StatusCode.SUCCESS) {
+            throw new Error(readString(this.mod, d, n));
+        }
+        const res = readString(this.mod, d, n);
+        dropResponseBuffers(this.mod);
+        return JSON.parse(res) as AnalyzedQuery;
+    }
     /** Send a query and return the full result */
     public runQuery(conn: number, text: string): Uint8Array {
         const [s, d, n] = callSRet(this.mod, 'duckdb_web_query_run', ['number', 'string'], [conn, text]);

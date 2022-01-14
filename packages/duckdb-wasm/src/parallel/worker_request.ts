@@ -1,5 +1,6 @@
 import { CSVInsertOptions, JSONInsertOptions, ArrowInsertOptions } from '../bindings/insert_options';
 import { LogEntryVariant } from '../log';
+import { AnalyzedQuery } from '../bindings/analyzed_query';
 import { ScriptTokens } from '../bindings/tokens';
 import { FileStatistics } from '../bindings/file_stats';
 import { DuckDBConfig } from '../bindings/config';
@@ -9,6 +10,7 @@ export type ConnectionID = number;
 export type StatementID = number;
 
 export enum WorkerRequestType {
+    ANALYZE_QUERY = 'ANALYZE_QUERY',
     CLOSE_PREPARED = 'CLOSE_PREPARED',
     COLLECT_FILE_STATISTICS = 'COLLECT_FILE_STATISTICS',
     CONNECT = 'CONNECT',
@@ -43,6 +45,7 @@ export enum WorkerRequestType {
 }
 
 export enum WorkerResponseType {
+    ANALYZED_QUERY = 'ANALYZED_QUERY',
     CONNECTION_INFO = 'CONNECTION_INFO',
     ERROR = 'ERROR',
     FEATURE_FLAGS = 'FEATURE_FLAGS',
@@ -99,6 +102,7 @@ export class WorkerTask<T, D, P> {
 }
 
 export type WorkerRequestVariant =
+    | WorkerRequest<WorkerRequestType.ANALYZE_QUERY, [ConnectionID, string]>
     | WorkerRequest<WorkerRequestType.CLOSE_PREPARED, [ConnectionID, StatementID]>
     | WorkerRequest<WorkerRequestType.COLLECT_FILE_STATISTICS, [string, boolean]>
     | WorkerRequest<WorkerRequestType.CONNECT, null>
@@ -135,6 +139,7 @@ export type WorkerRequestVariant =
     | WorkerRequest<WorkerRequestType.TOKENIZE, string>;
 
 export type WorkerResponseVariant =
+    | WorkerResponse<WorkerResponseType.ANALYZED_QUERY, AnalyzedQuery>
     | WorkerResponse<WorkerResponseType.CONNECTION_INFO, number>
     | WorkerResponse<WorkerResponseType.ERROR, any>
     | WorkerResponse<WorkerResponseType.FEATURE_FLAGS, number>
@@ -155,6 +160,7 @@ export type WorkerResponseVariant =
     | WorkerResponse<WorkerResponseType.VERSION_STRING, string>;
 
 export type WorkerTaskVariant =
+    | WorkerTask<WorkerRequestType.ANALYZE_QUERY, [number, string], AnalyzedQuery>
     | WorkerTask<WorkerRequestType.COLLECT_FILE_STATISTICS, [string, boolean], null>
     | WorkerTask<WorkerRequestType.CLOSE_PREPARED, [number, number], null>
     | WorkerTask<WorkerRequestType.CONNECT, null, ConnectionID>

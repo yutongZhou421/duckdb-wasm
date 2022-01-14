@@ -1,3 +1,4 @@
+export * from './analyzed_query';
 export * from './bindings_interface';
 export * from './bindings_base';
 export * from './config';

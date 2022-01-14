@@ -11,6 +11,7 @@ import { AsyncDuckDBBindings } from './async_bindings_interface';
 import { Logger } from '../log';
 import { AsyncDuckDBConnection } from './async_connection';
 import { CSVInsertOptions, JSONInsertOptions, ArrowInsertOptions } from '../bindings/insert_options';
+import { AnalyzedQuery } from '../bindings/analyzed_query';
 import { ScriptTokens } from '../bindings/tokens';
 import { FileStatistics } from '../bindings/file_stats';
 import { DuckDBConfig } from '../bindings/config';
@@ -209,6 +210,12 @@ export class AsyncDuckDB implements AsyncDuckDBBindings {
                     return;
                 }
                 break;
+            case WorkerRequestType.ANALYZE_QUERY:
+                if (response.type == WorkerResponseType.ANALYZED_QUERY) {
+                    task.promiseResolver(response.data);
+                    return;
+                }
+                break;
             case WorkerRequestType.RUN_PREPARED:
             case WorkerRequestType.RUN_QUERY:
                 if (response.type == WorkerResponseType.QUERY_RESULT) {
@@ -341,6 +348,15 @@ export class AsyncDuckDB implements AsyncDuckDBBindings {
             conn,
         );
         await this.postTask(task);
+    }
+
+    /** Analyze a query */
+    public async analyzeQuery(conn: ConnectionID, text: string): Promise<AnalyzedQuery> {
+        const task = new WorkerTask<WorkerRequestType.ANALYZE_QUERY, [ConnectionID, string], AnalyzedQuery>(
+            WorkerRequestType.ANALYZE_QUERY,
+            [conn, text],
+        );
+        return await this.postTask(task);
     }
 
     /** Run a query */

@@ -187,6 +187,12 @@ void duckdb_web_query_run(WASMResponse* packed, ConnectionHdl connHdl, const cha
     auto r = c->RunQuery(script);
     WASMResponseBuffer::Get().Store(*packed, std::move(r));
 }
+/// Analyze a query
+void duckdb_web_query_analyze(WASMResponse* packed, ConnectionHdl connHdl, const char* script) {
+    auto c = reinterpret_cast<WebDB::Connection*>(connHdl);
+    auto r = c->AnalyzeQuery(script);
+    WASMResponseBuffer::Get().Store(*packed, std::move(r));
+}
 /// Send a query
 void duckdb_web_query_send(WASMResponse* packed, ConnectionHdl connHdl, const char* script) {
     auto c = reinterpret_cast<WebDB::Connection*>(connHdl);

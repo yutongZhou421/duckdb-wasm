@@ -264,6 +264,7 @@ if(EMSCRIPTEN)
           _duckdb_web_prepared_run, \
           _duckdb_web_prepared_send, \
           _duckdb_web_query_fetch_results, \
+          _duckdb_web_query_analyze, \
           _duckdb_web_query_run, \
           _duckdb_web_query_send, \
           _duckdb_web_reset, \
