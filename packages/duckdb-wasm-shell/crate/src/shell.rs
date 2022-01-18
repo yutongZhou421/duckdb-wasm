@@ -1,4 +1,5 @@
 use crate::arrow_printer::{pretty_format_batches, UTF8_BORDERS_NO_HORIZONTAL};
+use crate::duckdb::analyzed_query::QueryDriver;
 use crate::duckdb::{
     AsyncDuckDB, AsyncDuckDBConnection, DataProtocol, PACKAGE_NAME, PACKAGE_VERSION,
 };
@@ -10,9 +11,9 @@ use crate::shell_runtime::{FileInfo, ShellRuntime};
 use crate::utils::{now, pretty_bytes, pretty_elapsed};
 use crate::vt100;
 use crate::xterm::Terminal;
-use arrow::array::Array;
-use arrow::array::StringArray;
+use arrow::array::{Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
+use arrow::ipc::reader::FileReader;
 use arrow::record_batch::RecordBatch;
 use chrono::Duration;
 use log::warn;
@@ -20,7 +21,9 @@ use scopeguard::defer;
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
+use std::error::Error;
 use std::fmt::Write;
+use std::io::Cursor;
 use std::sync::Arc;
 use std::sync::RwLock;
 use wasm_bindgen::prelude::*;
@@ -712,6 +715,26 @@ impl Shell {
         });
     }
 
+    async fn run_query_remotely(
+        text: &str,
+    ) -> Result<Vec<arrow::record_batch::RecordBatch>, Box<dyn Error + Send + Sync>> {
+        let data = reqwest::get("https://shell.duckdb.org/data/tpch/0_01/arrow/nation.arrow")
+            .await?
+            .bytes()
+            .await?
+            .to_vec();
+        let cursor = Cursor::new(data);
+        let reader = FileReader::try_new(cursor).unwrap();
+        let mut batches: Vec<arrow::record_batch::RecordBatch> = Vec::new();
+        for maybe_batch in reader {
+            match maybe_batch {
+                Ok(batch) => batches.push(batch),
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Ok(batches)
+    }
+
     /// Command handler
     async fn on_sql(text: String) {
         defer!({
@@ -742,12 +765,40 @@ impl Shell {
             }
         };
 
-        // Run the query
-        let start = now();
-        let batches = match conn.run_query(&text).await {
-            Ok(batches) => batches,
+        // Analyze the query first
+        let query = match conn.analyze_query(&text).await {
+            Ok(query) => query,
             Err(e) => {
                 let mut msg: String = e.message().into();
+                msg = msg.replace("\n", "\r\n");
+                Shell::with_mut(|s| {
+                    s.writeln(&msg);
+                });
+                return;
+            }
+        };
+
+        // Run the query either locally or remotely
+        let start = now();
+        let result: Result<Vec<arrow::record_batch::RecordBatch>, String> =
+            match query.recommended_driver {
+                QueryDriver::Local => {
+                    Shell::with_mut(|s| s.writeln("running query locally"));
+                    conn.run_query(&text).await.map_err(|e| e.message().into())
+                }
+                QueryDriver::Remote => {
+                    Shell::with_mut(|s| s.writeln("running query on remote"));
+                    Shell::run_query_remotely(&text)
+                        .await
+                        .map_err(|e| e.to_string())
+                }
+            };
+
+        // Run the query
+        let batches = match result {
+            Ok(batches) => batches,
+            Err(e) => {
+                let mut msg: String = e.into();
                 msg = msg.replace("\n", "\r\n");
                 Shell::with_mut(|s| {
                     s.writeln(&msg);

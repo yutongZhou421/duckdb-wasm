@@ -199,16 +199,18 @@ arrow::Result<std::shared_ptr<arrow::Buffer>> WebDB::Connection::FetchQueryResul
 
 arrow::Result<std::string> WebDB::Connection::AnalyzeQuery(std::string_view text) {
     try {
-        auto result = connection_.SendQuery(std::string{text});
-        if (!result->success) {
-            return arrow::Status{arrow::StatusCode::ExecutionError, move(result->error)};
-        }
+        // Do arbitrary things to figure out where to run the query
+
+        // auto result = connection_.SendQuery(std::string{text});
+        // if (!result->success) {
+        //     return arrow::Status{arrow::StatusCode::ExecutionError, move(result->error)};
+        // }
         rapidjson::Document doc;
         doc.SetObject();
         auto& allocator = doc.GetAllocator();
 
         // XXX
-        doc.AddMember("driver", "remote", allocator);
+        doc.AddMember("recommendedDriver", "remote", allocator);
 
         rapidjson::StringBuffer strbuf;
         rapidjson::Writer<rapidjson::StringBuffer> writer{strbuf};

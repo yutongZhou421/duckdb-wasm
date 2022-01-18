@@ -1,3 +1,3 @@
 export interface AnalyzedQuery {
-    driver: 'remote' | 'local';
+    recommendedDriver: 'remote' | 'local';
 }

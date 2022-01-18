@@ -1,3 +1,4 @@
+use super::analyzed_query::AnalyzedQuery;
 use super::tokens::{JsScriptTokens, ScriptTokens};
 use super::web_file::WebFile;
 use super::{FileStatistics, JsFileStatistics};
@@ -245,5 +246,17 @@ impl AsyncDuckDBConnection {
             Ok(r) => Ok(r),
             Err(err) => Err(js_sys::Error::new(&err.to_string())),
         }
+    }
+
+    pub async fn analyze_query(&self, txt: &str) -> Result<AnalyzedQuery, js_sys::Error> {
+        let analyzed = self
+            .duckdb
+            .read()
+            .unwrap()
+            .bindings
+            .analyze_query(self.connection, txt)
+            .await?;
+        let query: AnalyzedQuery = analyzed.into_serde().unwrap();
+        Ok(query)
     }
 }

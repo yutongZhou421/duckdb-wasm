@@ -1,5 +1,6 @@
 mod async_duckdb;
 
+pub mod analyzed_query;
 pub mod file_stats;
 pub mod tokens;
 mod version;
