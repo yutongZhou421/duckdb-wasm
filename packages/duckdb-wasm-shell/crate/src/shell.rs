@@ -1,5 +1,4 @@
 use crate::arrow_printer::{pretty_format_batches, UTF8_BORDERS_NO_HORIZONTAL};
-use crate::duckdb::analyzed_query::QueryDriver;
 use crate::duckdb::{
     AsyncDuckDB, AsyncDuckDBConnection, DataProtocol, PACKAGE_NAME, PACKAGE_VERSION,
 };
@@ -781,16 +780,16 @@ impl Shell {
         // Run the query either locally or remotely
         let start = now();
         let result: Result<Vec<arrow::record_batch::RecordBatch>, String> =
-            match query.recommended_driver {
-                QueryDriver::Local => {
-                    Shell::with_mut(|s| s.writeln("running query locally"));
-                    conn.run_query(&text).await.map_err(|e| e.message().into())
-                }
-                QueryDriver::Remote => {
+            match query.recommended_driver.as_str() {
+                "remote" => {
                     Shell::with_mut(|s| s.writeln("running query on remote"));
                     Shell::run_query_remotely(&text)
                         .await
                         .map_err(|e| e.to_string())
+                }
+                _ => {
+                    Shell::with_mut(|s| s.writeln("running query locally"));
+                    conn.run_query(&text).await.map_err(|e| e.message().into())
                 }
             };
 

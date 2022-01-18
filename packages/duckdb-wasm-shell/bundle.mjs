@@ -33,6 +33,11 @@ function printErr(err) {
 // -------------------------------
 // Wasm plugin
 
+execSync(`node install.js`, {
+    cwd: path.join(__dirname, '..', '..', 'node_modules', 'wasm-pack'),
+    stdio: 'inherit',
+});
+
 const mode = is_debug ? '--debug' : '--release';
 execSync(`wasm-pack build --target web --out-dir ./pkg --out-name shell ${mode}`, {
     cwd: path.join(__dirname, 'crate'),
