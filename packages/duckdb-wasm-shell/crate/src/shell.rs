@@ -718,7 +718,7 @@ impl Shell {
         text: &str,
     ) -> Result<Vec<arrow::record_batch::RecordBatch>, Box<dyn Error + Send + Sync>> {
         let client = reqwest::Client::new();
-        let data = client.post("https://fcf008b767a451.lhr.life/invoke/01FQNF4HW2NG8G00GZJ0000007")
+        let data = client.post("https://45743b0b12b6ca.lhr.life/invoke/01FQNF4HW2NG8G00GZJ0000007")
             .body(text.to_string())
             .send()
             .await?
