@@ -717,10 +717,10 @@ impl Shell {
     async fn run_query_remotely(
         text: &str,
     ) -> Result<Vec<arrow::record_batch::RecordBatch>, Box<dyn Error + Send + Sync>> {
-        let client = reqwest::Client::new();
-        let data = client.post("http://c52a-212-204-102-90.ngrok.io/invoke/01FQNF4HW2NG8G00GZJ0000007")
-            .body(text.to_string())
-            .send()
+        // let client = reqwest::Client::new();
+        let data = reqwest::get("https://shell.duckdb.org/data/tpch/0_01/arrow/nation.arrow")
+            // .body(text.to_string())
+            // .send()
             .await?
             .bytes()
             .await?
