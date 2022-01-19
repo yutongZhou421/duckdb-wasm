@@ -716,7 +716,7 @@ impl Shell {
 
     async fn run_query_remotely(
         text: &str,
-    ) -> Result<Vec<arrow::record_batch::RecordBatch>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<arrow::record_batch::RecordBatch>, Box<dyn Error + Send + Sync + '_>> {
         let client = reqwest::Client::new();
         let data = client.post("https://fcf008b767a451.lhr.life/invoke/01FQNF4HW2NG8G00GZJ0000007")
             .body(text)
