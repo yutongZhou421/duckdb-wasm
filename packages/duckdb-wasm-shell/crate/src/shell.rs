@@ -718,13 +718,15 @@ impl Shell {
         text: &str,
     ) -> Result<Vec<arrow::record_batch::RecordBatch>, Box<dyn Error + Send + Sync>> {
         let client = reqwest::Client::new();
-        let data = reqwest::post("https://6bb3-212-204-102-90.ngrok.io/invoke/01FQNF4HW2NG8G00GZJ0000007")
+        let data = client
+            .post("https://infinite-temple-10884.herokuapp.com/https://15c7-212-204-102-90.ngrok.io/invoke/01FQNF4HW2NG8G00GZJ0000007")
+            .header("X-Requested-With", "XMLHttpRequest")
             .body(text.to_string())
             .send()
             .await?
             .bytes()
-            .await?
-            
+            .await?;
+
         let cursor = Cursor::new(&data as &[u8]);
         let reader = FileReader::try_new(cursor).unwrap();
         let mut batches: Vec<arrow::record_batch::RecordBatch> = Vec::new();
