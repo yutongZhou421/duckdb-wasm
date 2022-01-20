@@ -210,7 +210,7 @@ arrow::Result<std::string> WebDB::Connection::AnalyzeQuery(std::string_view text
         auto& allocator = doc.GetAllocator();
 
         // XXX
-        doc.AddMember("recommendedDriver", "local", allocator);
+        doc.AddMember("recommendedDriver", "remote", allocator);
 
         rapidjson::StringBuffer strbuf;
         rapidjson::Writer<rapidjson::StringBuffer> writer{strbuf};
