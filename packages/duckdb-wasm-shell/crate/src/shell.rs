@@ -725,7 +725,7 @@ impl Shell {
             .bytes()
             .await?
             
-        let cursor = Cursor::new(&response_bytes as &[u8]);
+        let cursor = Cursor::new(&data as &[u8]);
         let reader = FileReader::try_new(cursor).unwrap();
         let mut batches: Vec<arrow::record_batch::RecordBatch> = Vec::new();
         for maybe_batch in reader {
