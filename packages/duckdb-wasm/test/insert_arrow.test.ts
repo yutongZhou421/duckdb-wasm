@@ -16,8 +16,19 @@ interface ArrowInsertTest {
 
 interface ArrowBatch {
     numRows: number;
-    columns: arrow.Vector[];
+    columns: arrow.Data[];
 }
+
+const buildUtf8Array = (values: string[]) => {
+    const builder = new arrow.Utf8Builder({
+        type: new arrow.Utf8(),
+    });
+    for (const v of values) {
+        builder.append(v);
+    }
+    builder.finish();
+    return builder.flush();
+};
 
 export function generateXInt32(n: number, cols: number): number[][] {
     const columns = [];
@@ -41,13 +52,16 @@ export function generateArrowXInt32(n: number, cols: number): [arrow.Schema, arr
     const batches = [];
     for (let i = 0; i < n; ) {
         const rows = Math.min(1000, n - i);
-        batches.push(
-            new arrow.RecordBatch(
-                schema,
-                rows,
-                columns.map(c => arrow.Int32Vector.from(c.slice(i, i + n))),
+        const data = arrow.makeData({
+            type: new arrow.Struct(fields),
+            children: columns.map(c =>
+                arrow.makeData({
+                    type: new arrow.Int32(),
+                    data: new Int32Array(c.slice(i, i + rows)),
+                }),
             ),
-        );
+        });
+        batches.push(new arrow.RecordBatch(schema, data));
         i += rows;
     }
     return [schema, batches];
@@ -65,9 +79,9 @@ const ARROW_INSERT_TESTS: ArrowInsertTest[] = [
             {
                 numRows: 3,
                 columns: [
-                    arrow.Int32Vector.from([1, 4, 7]),
-                    arrow.Int32Vector.from([2, 5, 8]),
-                    arrow.Int32Vector.from([3, 6, 9]),
+                    arrow.makeData({ type: new arrow.Int32(), data: new Int32Array([1, 4, 7]) }),
+                    arrow.makeData({ type: new arrow.Int32(), data: new Int32Array([2, 5, 8]) }),
+                    arrow.makeData({ type: new arrow.Int32(), data: new Int32Array([3, 6, 9]) }),
                 ],
             },
         ],
@@ -93,9 +107,9 @@ const ARROW_INSERT_TESTS: ArrowInsertTest[] = [
             {
                 numRows: 3,
                 columns: [
-                    arrow.Int32Vector.from([1, 4, 7]),
-                    arrow.Int16Vector.from([2, 5, 8]),
-                    arrow.Utf8Vector.from(['3', '6', '9']),
+                    arrow.makeData({ type: new arrow.Int32(), data: new Int32Array([1, 4, 7]) }),
+                    arrow.makeData({ type: new arrow.Int16(), data: new Int16Array([2, 5, 8]) }),
+                    buildUtf8Array(['3', '6', '9']),
                 ],
             },
         ],
@@ -121,17 +135,17 @@ const ARROW_INSERT_TESTS: ArrowInsertTest[] = [
             {
                 numRows: 3,
                 columns: [
-                    arrow.Int32Vector.from([1, 4, 7]),
-                    arrow.Int16Vector.from([2, 5, 8]),
-                    arrow.Utf8Vector.from(['3', '6', '9']),
+                    arrow.makeData({ type: new arrow.Int32(), data: new Int32Array([1, 4, 7]) }),
+                    arrow.makeData({ type: new arrow.Int16(), data: new Int16Array([2, 5, 8]) }),
+                    buildUtf8Array(['3', '6', '9']),
                 ],
             },
             {
                 numRows: 2,
                 columns: [
-                    arrow.Int32Vector.from([10, 13]),
-                    arrow.Int16Vector.from([11, 14]),
-                    arrow.Utf8Vector.from(['12', '15']),
+                    arrow.makeData({ type: new arrow.Int32(), data: new Int32Array([10, 13]) }),
+                    arrow.makeData({ type: new arrow.Int16(), data: new Int16Array([11, 14]) }),
+                    buildUtf8Array(['12', '15']),
                 ],
             },
         ],
@@ -164,10 +178,14 @@ export function testArrowInsert(db: () => duckdb.DuckDBBindings): void {
         for (const test of ARROW_INSERT_TESTS) {
             it(test.name, () => {
                 conn.query(`DROP TABLE IF EXISTS ${test.options.schema || 'main'}.${test.options.name}`);
-                const table = new arrow.Table(
-                    test.schema,
-                    test.batches.map(b => new arrow.RecordBatch(test.schema, b.numRows, b.columns)),
-                );
+                const batches = test.batches.map(b => {
+                    const data = arrow.makeData({
+                        type: new arrow.Struct(test.schema.fields),
+                        children: b.columns,
+                    });
+                    return new arrow.RecordBatch(test.schema, data);
+                });
+                const table = new arrow.Table(test.schema, batches);
                 conn.insertArrowTable(table, test.options);
                 const results = conn.query(test.query);
                 compareTable(results, test.expectedColumns);
@@ -192,10 +210,14 @@ export function testArrowInsertAsync(db: () => duckdb.AsyncDuckDB): void {
         for (const test of ARROW_INSERT_TESTS) {
             it(test.name, async () => {
                 await conn.query(`DROP TABLE IF EXISTS ${test.options.schema || 'main'}.${test.options.name}`);
-                const table = new arrow.Table(
-                    test.schema,
-                    test.batches.map(b => new arrow.RecordBatch(test.schema, b.numRows, b.columns)),
-                );
+                const batches = test.batches.map(b => {
+                    const data = arrow.makeData({
+                        type: new arrow.Struct(test.schema.fields),
+                        children: b.columns,
+                    });
+                    return new arrow.RecordBatch(test.schema, data);
+                });
+                const table = new arrow.Table(test.schema, batches);
                 await conn.insertArrowTable(table, test.options);
                 const results = await conn.query(test.query);
                 compareTable(results, test.expectedColumns);
@@ -205,14 +227,11 @@ export function testArrowInsertAsync(db: () => duckdb.AsyncDuckDB): void {
     describe('Arrow async insert from table', () => {
         it('simple integers', async () => {
             await conn.query(`DROP TABLE IF EXISTS insert_from_table`);
-            const table = arrow.Table.new(
-                [
-                    arrow.Int32Vector.from([1, 4, 7]),
-                    arrow.Int32Vector.from([2, 5, 8]),
-                    arrow.Utf8Vector.from(['3', '6', '9']),
-                ],
-                ['a', 'b', 'c'],
-            );
+            const table = new arrow.Table({
+                a: arrow.makeVector(new Int32Array([1, 4, 7])),
+                b: arrow.makeVector(new Int32Array([2, 5, 8])),
+                c: arrow.vectorFromArray<arrow.Utf8>(['3', '6', '9']),
+            });
             await conn.insertArrowTable(table, {
                 name: 'insert_from_vectors',
             });

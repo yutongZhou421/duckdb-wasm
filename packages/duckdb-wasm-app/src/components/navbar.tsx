@@ -1,6 +1,6 @@
 import * as React from 'react';
 import classNames from 'classnames';
-import { useLocation, Link } from 'react-router-dom';
+import { useLocation, Link, useSearchParams } from 'react-router-dom';
 
 import styles from './navbar.module.css';
 
@@ -65,22 +65,25 @@ export const NavBar: React.FC<Props> = (_props: Props) => {
             <div className={styles.tabs}>
                 <Tab route="/" location={location.pathname} icon={icon_shell} />
                 <Tab route="docs/modules/index.html" location={location.pathname} icon={icon_book} external />
-                <Tab route="/versus" location={location.pathname} text="vs" />
             </div>
         </div>
     );
 };
 
-export function withNavBar<P>(Component: React.ComponentType<P>): React.FunctionComponent<P> {
-    // eslint-disable-next-line react/display-name
-    return (props: P) => {
+type ContainerProps = {
+    children: React.ReactElement[] | React.ReactElement;
+};
+
+export const NavBarContainer: React.FC<ContainerProps> = (props: ContainerProps) => {
+    const [searchParams] = useSearchParams();
+    if ((searchParams.get('fullscreen') || '') === 'true') {
+        return <>props.children</>;
+    } else {
         return (
             <div className={styles.container}>
                 <NavBar />
-                <div className={styles.page}>
-                    <Component {...props} />
-                </div>
+                <div className={styles.page}>{props.children}</div>
             </div>
         );
-    };
-}
+    }
+};

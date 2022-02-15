@@ -26,11 +26,7 @@ namespace io {
 class WebFileSystem : public duckdb::FileSystem {
    public:
     /// The data protocol
-    enum DataProtocol : uint8_t {
-        BUFFER = 0,
-        NATIVE = 1,
-        HTTP = 3,
-    };
+    enum DataProtocol : uint8_t { BUFFER = 0, NATIVE = 1, HTTP = 3, S3 = 4 };
 
     /// A simple buffer.
     /// It might be worth to make this chunked eventually.
@@ -81,6 +77,11 @@ class WebFileSystem : public duckdb::FileSystem {
         std::optional<uint32_t> data_fd_ = std::nullopt;
         /// The data URL (if any)
         std::optional<std::string> data_url_ = std::nullopt;
+
+        /// Buffered http file for writing: file is a buffered HTTP/S3 and should be written to data_url_ on closing
+        bool buffered_http_file_ = false;
+        /// The extensionOptions at time of opening the http file as buffer
+        std::optional<DuckDBConfigOptions> buffered_http_config_options_ = std::nullopt;
 
         /// The file stats
         std::shared_ptr<io::FileStatisticsCollector> file_stats_ = nullptr;
@@ -156,6 +157,8 @@ class WebFileSystem : public duckdb::FileSystem {
     std::unordered_map<uint32_t, std::unique_ptr<ReadAheadBuffer>> readahead_buffers_ = {};
     /// The file statistics
     std::shared_ptr<io::FileStatisticsRegistry> file_statistics_;
+    /// Cache epoch for synchronization of JS caches
+    std::atomic<uint32_t> cache_epoch_ = 1;
 
     /// Allocate a file id.
     /// XXX This could of course overflow....
@@ -172,16 +175,22 @@ class WebFileSystem : public duckdb::FileSystem {
     /// Delete copy constructor
     WebFileSystem(const WebFileSystem &other) = delete;
 
+    /// Get the config
+    auto Config() const { return config_; }
+    /// Load the current cache epoch
+    auto LoadCacheEpoch() const { return cache_epoch_.load(std::memory_order_relaxed); }
     /// Get a file info as JSON string
     inline WebFile *GetFile(uint32_t file_id) const {
         return files_by_id_.count(file_id) ? files_by_id_.at(file_id).get() : nullptr;
     }
     /// Set a file descriptor
     arrow::Status SetFileDescriptor(uint32_t file_id, uint32_t file_descriptor);
+    /// Write the global file info as a JSON
+    rapidjson::Value WriteGlobalFileInfo(rapidjson::Document &doc, uint32_t cache_epoch);
     /// Write the file info as JSON
-    rapidjson::Value WriteFileInfo(rapidjson::Document &doc, uint32_t file_id);
+    rapidjson::Value WriteFileInfo(rapidjson::Document &doc, uint32_t file_id, uint32_t cache_epoch);
     /// Write the file info as JSON
-    rapidjson::Value WriteFileInfo(rapidjson::Document &doc, std::string_view file_name);
+    rapidjson::Value WriteFileInfo(rapidjson::Document &doc, std::string_view file_name, uint32_t cache_epoch);
     /// Register a file URL
     arrow::Result<std::unique_ptr<WebFileHandle>> RegisterFileURL(std::string_view file_name, std::string_view file_url,
                                                                   std::optional<uint64_t> file_size);
@@ -196,6 +205,9 @@ class WebFileSystem : public duckdb::FileSystem {
     void ConfigureFileStatistics(std::shared_ptr<FileStatisticsRegistry> registry);
     /// Collect file statistics
     void CollectFileStatistics(std::string_view path, std::shared_ptr<FileStatisticsCollector> collector);
+
+    // Increment the Cache epoch, this allows detecting stale fileInfoCaches from JS
+    void IncrementCacheEpoch();
 
    public:
     /// Open a file
@@ -266,6 +278,9 @@ class WebFileSystem : public duckdb::FileSystem {
    protected:
     /// Return the name of the filesytem. Used for forming diagnosis messages.
     std::string GetName() const override;
+    /// Write the s3 config to a rapidJSON value
+    static rapidjson::Value writeS3Config(DuckDBConfigOptions &extension_options,
+                                          rapidjson::Document::AllocatorType allocator);
 };
 
 }  // namespace io

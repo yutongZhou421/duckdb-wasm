@@ -19,6 +19,7 @@
 #include "duckdb/web/utils/scope_guard.h"
 #include "duckdb/web/utils/thread.h"
 #include "duckdb/web/utils/wasm_response.h"
+#include "rapidjson/allocators.h"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -82,6 +83,7 @@ static duckdb::FileHandle &GetOrOpen(size_t file_id) {
         }
         case WebFileSystem::DataProtocol::BUFFER:
         case WebFileSystem::DataProtocol::HTTP:
+        case WebFileSystem::DataProtocol::S3:
             throw std::logic_error("data protocol not supported by fake webfs runtime");
     }
     throw std::logic_error("unknown data protocol");
@@ -100,7 +102,7 @@ struct OpenedFile {
 #else
 #define RT_FN(FUNC, IMPL) FUNC IMPL;
 #endif
-RT_FN(void *duckdb_web_fs_file_open(size_t file_id), {
+RT_FN(void *duckdb_web_fs_file_open(size_t file_id, uint8_t flags), {
     auto &file = GetOrOpen(file_id);
     auto result = std::make_unique<OpenedFile>();
     result->file_size = file.GetFileSize();
@@ -209,6 +211,27 @@ ReadAheadBuffer *WebFileSystem::WebFileHandle::ResolveReadAheadBuffer(std::share
     return readahead_;
 }
 
+static inline bool hasPrefix(std::string_view text, std::string_view prefix) {
+    return text.compare(0, prefix.size(), prefix) == 0;
+}
+
+static inline WebFileSystem::DataProtocol inferDataProtocol(std::string_view url) {
+    // Infer the data protocol from the prefix
+    std::string_view data_url = url;
+    auto proto = WebFileSystem::DataProtocol::BUFFER;
+    if (hasPrefix(url, "http://") || hasPrefix(url, "https://")) {
+        proto = WebFileSystem::DataProtocol::HTTP;
+    } else if (hasPrefix(url, "s3://")) {
+        proto = WebFileSystem::DataProtocol::S3;
+    } else if (hasPrefix(url, "file://")) {
+        data_url = std::string_view{url}.substr(7);
+        proto = WebFileSystem::DataProtocol::NATIVE;
+    } else {
+        proto = WebFileSystem::DataProtocol::NATIVE;
+    }
+    return proto;
+}
+
 /// Close a file handle
 void WebFileSystem::WebFileHandle::Close() {
     DEBUG_TRACE();
@@ -230,8 +253,22 @@ void WebFileSystem::WebFileHandle::Close() {
     // Failed to lock exclusively?
     if (!have_file_lock) return;
     // Is buffered file?
-    if (file.data_protocol_ == DataProtocol::BUFFER) return;
+    if (file.data_protocol_ == DataProtocol::BUFFER) {
+        if (file.buffered_http_file_) {
+            file.data_protocol_ = inferDataProtocol(file.data_url_.value());
+            fs.IncrementCacheEpoch();
 
+            size_t n =
+                duckdb_web_fs_file_write(file.file_id_, file.data_buffer_->Get().data(), file.data_buffer_->Size(), 0);
+
+            if (n != file.file_size_.value()) {
+                std::string msg = std::string{"Failed to write file: "} + file.file_name_;
+                throw std::runtime_error(msg);
+            }
+        } else {
+            return;
+        }
+    }
     // Close the file in the runtime
     fs_guard.unlock();
     duckdb_web_fs_file_close(file.file_id_);
@@ -249,26 +286,6 @@ void WebFileSystem::WebFileHandle::Close() {
     fs_guard.unlock();
     file_guard.unlock();
 }
-
-static inline bool hasPrefix(std::string_view text, std::string_view prefix) {
-    return text.compare(0, prefix.size(), prefix) == 0;
-}
-
-static inline WebFileSystem::DataProtocol inferDataProtocol(std::string_view url) {
-    // Infer the data protocol from the prefix
-    std::string_view data_url = url;
-    auto proto = WebFileSystem::DataProtocol::BUFFER;
-    if (hasPrefix(url, "http://") || hasPrefix(url, "https://")) {
-        proto = WebFileSystem::DataProtocol::HTTP;
-    } else if (hasPrefix(url, "file://")) {
-        data_url = std::string_view{url}.substr(7);
-        proto = WebFileSystem::DataProtocol::NATIVE;
-    } else {
-        proto = WebFileSystem::DataProtocol::NATIVE;
-    }
-    return proto;
-}
-
 /// Get the info
 rapidjson::Value WebFileSystem::WebFile::WriteInfo(rapidjson::Document &doc) const {
     DEBUG_TRACE();
@@ -279,6 +296,7 @@ rapidjson::Value WebFileSystem::WebFile::WriteInfo(rapidjson::Document &doc) con
     rapidjson::Value data_url{rapidjson::kNullType};
 
     // Add the JSON document members
+    value.AddMember("cacheEpoch", rapidjson::Value{filesystem_.LoadCacheEpoch()}, allocator);
     value.AddMember("fileId", rapidjson::Value{file_id_}, allocator);
     value.AddMember("fileName",
                     rapidjson::Value{file_name_.c_str(), static_cast<rapidjson::SizeType>(file_name_.size())},
@@ -291,14 +309,27 @@ rapidjson::Value WebFileSystem::WebFile::WriteInfo(rapidjson::Document &doc) con
         data_url = rapidjson::Value{data_url_->c_str(), static_cast<rapidjson::SizeType>(data_url_->size())};
         value.AddMember("dataUrl", data_url, allocator);
     }
-    if (data_fd_) {
-        rapidjson::Value data_fd{rapidjson::kNullType};
-        value.AddMember("dataNativeFd", data_fd, allocator);
+    if (data_fd_.has_value()) {
+        value.AddMember("dataNativeFd", rapidjson::Value{data_fd_.value()}, allocator);
     }
-    if (data_protocol_ == DataProtocol::HTTP && filesystem_.config_->filesystem.allow_full_http_reads.value_or(true)) {
+    if ((data_protocol_ == DataProtocol::HTTP || data_protocol_ == DataProtocol::S3) &&
+        filesystem_.config_->filesystem.allow_full_http_reads.value_or(true)) {
         value.AddMember("allowFullHttpReads", true, allocator);
     }
     value.AddMember("collectStatistics", filesystem_.file_statistics_->TracksFile(file_name_), doc.GetAllocator());
+
+    if (data_protocol_ == DataProtocol::S3) {
+        if (buffered_http_file_) {
+            value.AddMember(
+                "s3Config",
+                writeS3Config(const_cast<DuckDBConfigOptions &>(buffered_http_config_options_.value()), allocator),
+                allocator);
+        } else {
+            value.AddMember("s3Config", writeS3Config(filesystem_.config_->duckdb_config_options, allocator),
+                            allocator);
+        }
+    }
+
     return value;
 }
 
@@ -375,6 +406,7 @@ arrow::Result<std::unique_ptr<WebFileSystem::WebFileHandle>> WebFileSystem::Regi
             }
             // Overwrite with buffer
             case DataProtocol::HTTP:
+            case DataProtocol::S3:
             case DataProtocol::BUFFER:
                 file->data_protocol_ = DataProtocol::BUFFER;
                 file->file_size_ = file_buffer.Size();
@@ -438,9 +470,39 @@ arrow::Status WebFileSystem::SetFileDescriptor(uint32_t file_id, uint32_t file_d
     return arrow::Status::OK();
 }
 
-/// Write the file info as JSON
-rapidjson::Value WebFileSystem::WriteFileInfo(rapidjson::Document &doc, uint32_t file_id) {
+/// Write the global filesystem info
+rapidjson::Value WebFileSystem::WriteGlobalFileInfo(rapidjson::Document &doc, uint32_t cache_epoch) {
     DEBUG_TRACE();
+    if (cache_epoch == LoadCacheEpoch()) {
+        rapidjson::Value value;
+        value.SetNull();
+        return value;
+    }
+
+    rapidjson::Value value;
+    value.SetObject();
+    auto &allocator = doc.GetAllocator();
+
+    // Add the JSON document members
+    value.AddMember("cacheEpoch", rapidjson::Value{LoadCacheEpoch()}, allocator);
+
+    if (config_->filesystem.allow_full_http_reads.value_or(true)) {
+        value.AddMember("allowFullHttpReads", true, allocator);
+    }
+
+    value.AddMember("s3Config", writeS3Config(config_->duckdb_config_options, allocator), allocator);
+
+    return value;
+}
+
+/// Write the file info as JSON
+rapidjson::Value WebFileSystem::WriteFileInfo(rapidjson::Document &doc, uint32_t file_id, uint32_t cache_epoch) {
+    DEBUG_TRACE();
+    if (cache_epoch == LoadCacheEpoch()) {
+        rapidjson::Value value;
+        value.SetNull();
+        return value;
+    }
     std::unique_lock<LightMutex> fs_guard{fs_mutex_};
     auto iter = files_by_id_.find(file_id);
     if (iter == files_by_id_.end()) {
@@ -453,14 +515,21 @@ rapidjson::Value WebFileSystem::WriteFileInfo(rapidjson::Document &doc, uint32_t
 }
 
 /// Write the file info as JSON
-rapidjson::Value WebFileSystem::WriteFileInfo(rapidjson::Document &doc, std::string_view file_name) {
+rapidjson::Value WebFileSystem::WriteFileInfo(rapidjson::Document &doc, std::string_view file_name,
+                                              uint32_t cache_epoch) {
     DEBUG_TRACE();
+    if (cache_epoch == LoadCacheEpoch()) {
+        rapidjson::Value value;
+        value.SetNull();
+        return value;
+    }
     std::unique_lock<LightMutex> fs_guard{fs_mutex_};
     auto iter = files_by_name_.find(std::string{file_name});
     if (iter == files_by_name_.end()) {
         auto proto = inferDataProtocol(file_name);
         rapidjson::Value value;
         value.SetObject();
+        value.AddMember("cacheEpoch", rapidjson::Value{LoadCacheEpoch()}, doc.GetAllocator());
         value.AddMember("fileName",
                         rapidjson::Value{file_name.data(), static_cast<rapidjson::SizeType>(file_name.size())},
                         doc.GetAllocator());
@@ -497,6 +566,18 @@ void WebFileSystem::CollectFileStatistics(std::string_view path, std::shared_ptr
     std::unique_lock<SharedMutex> file_guard{files_iter->second->file_mutex_};
     file_hdl.file_->file_stats_ = collector;
     file_hdl.file_->file_stats_->Resize(file_hdl.file_->file_size_.value_or(0));
+}
+
+// Increment the Cache epoch, this allows detecting stale fileInfoCaches from JS
+void WebFileSystem::IncrementCacheEpoch() {
+    DEBUG_TRACE();
+    auto curr_epoch = cache_epoch_.load(std::memory_order_relaxed);
+    while (true) {
+        auto next = (curr_epoch == std::numeric_limits<uint32_t>::max()) ? 1 : curr_epoch + 1;
+        if (cache_epoch_.compare_exchange_strong(curr_epoch, next)) {
+            break;
+        }
+    }
 }
 
 /// Open a file
@@ -543,25 +624,33 @@ std::unique_ptr<duckdb::FileHandle> WebFileSystem::OpenFile(const string &url, u
             if (file->data_fd_.has_value()) break;
             // Otherwise treat as HTTP
         case DataProtocol::HTTP:
+        case DataProtocol::S3:
             try {
                 // Open the file
-                auto *opened = duckdb_web_fs_file_open(file->file_id_);
+                auto *opened = duckdb_web_fs_file_open(file->file_id_, flags);
                 if (opened == nullptr) {
                     std::string msg = std::string{"Failed to open file: "} + file->file_name_;
                     throw std::runtime_error(msg);
                 }
                 auto owned = std::unique_ptr<OpenedFile>(static_cast<OpenedFile *>(opened));
                 file->file_size_ = owned->file_size;
-
-                // Was the file fully copied into wasm memory?
-                // This can happen if the data source does not support HTTP range requests.
                 auto *buffer_ptr = reinterpret_cast<char *>(static_cast<uintptr_t>(owned->file_buffer));
+
+                // A buffer was returned, this can happen for 3 reasons:
+                //  1: The data source does not support HTTP range requests and allowFullHTTPRequests is true.
+                //  2: The file has the HTTP or S3 protocol and was openened with the write flag.
+                //  3: The file is a native file that was not found, in this case a fallback occurs to an empty buffer
                 if (buffer_ptr) {
+                    if ((file->data_protocol_ == DataProtocol::S3 || file->data_protocol_ == DataProtocol::HTTP) &&
+                        (flags & duckdb::FileFlags::FILE_FLAGS_WRITE)) {
+                        file->buffered_http_file_ = true;
+                        file->buffered_http_config_options_ = config_->duckdb_config_options;
+                    }
                     auto owned_buffer = std::unique_ptr<char[]>(buffer_ptr);
                     file->data_protocol_ = DataProtocol::BUFFER;
                     file->data_buffer_ =
                         DataBuffer{std::move(owned_buffer), static_cast<size_t>(file->file_size_.value_or(0))};
-                    // XXX Note that data_url is still set
+                    // XXX Note that data_url is still set.
                 }
 
                 // Truncate file?
@@ -572,7 +661,7 @@ std::unique_ptr<duckdb::FileHandle> WebFileSystem::OpenFile(const string &url, u
                 }
 
             } catch (std::exception &e) {
-                /// Something wen't wrong, abort opening the file
+                /// Something went wrong, abort opening the file
                 fs_guard.lock();
                 files_by_name_.erase(file->file_name_);
                 auto iter = files_by_id_.find(file->file_id_);
@@ -637,7 +726,8 @@ int64_t WebFileSystem::Read(duckdb::FileHandle &handle, void *buffer, int64_t nr
 
         // Just read with the filesystem api
         case DataProtocol::NATIVE:
-        case DataProtocol::HTTP: {
+        case DataProtocol::HTTP:
+        case DataProtocol::S3: {
             if (auto ra = file_hdl.ResolveReadAheadBuffer(file_guard)) {
                 auto reader = [&](auto *out, size_t n, duckdb::idx_t ofs) {
                     return duckdb_web_fs_file_read(file.file_id_, out, n, ofs);
@@ -747,7 +837,8 @@ int64_t WebFileSystem::Write(duckdb::FileHandle &handle, void *buffer, int64_t n
             bytes_read = n;
             break;
         }
-        case DataProtocol::HTTP: {
+        case DataProtocol::HTTP:
+        case DataProtocol::S3: {
             // XXX How should handle writing HTTP files?
             throw std::runtime_error("writing to HTTP files is not implemented");
         }
@@ -776,7 +867,8 @@ time_t WebFileSystem::GetLastModifiedTime(duckdb::FileHandle &handle) {
         case DataProtocol::BUFFER:
             return 0;
         case DataProtocol::NATIVE:
-        case DataProtocol::HTTP: {
+        case DataProtocol::HTTP:
+        case DataProtocol::S3: {
             return duckdb_web_fs_file_get_last_modified_time(file.file_id_);
         }
     }
@@ -798,7 +890,8 @@ void WebFileSystem::Truncate(duckdb::FileHandle &handle, int64_t new_size) {
             file.data_buffer_->Resize(new_size);
             break;
         case DataProtocol::NATIVE:
-        case DataProtocol::HTTP: {
+        case DataProtocol::HTTP:
+        case DataProtocol::S3: {
             duckdb_web_fs_file_truncate(file.file_id_, new_size);
             break;
         }
@@ -891,6 +984,40 @@ bool WebFileSystem::OnDiskFile(FileHandle &handle) { return true; }
 /// Return the name of the filesytem. Used for forming diagnosis messages.
 std::string WebFileSystem::GetName() const { return "WebFileSystem"; }
 
+/// Write the s3 config to a rapidjson value.
+rapidjson::Value WebFileSystem::writeS3Config(DuckDBConfigOptions &extension_options,
+                                              rapidjson::Document::AllocatorType allocator) {
+    rapidjson::Value s3Config;
+    s3Config.SetObject();
+
+    rapidjson::Value s3_region{rapidjson::kNullType};
+    s3_region = rapidjson::Value{extension_options.s3_region.c_str(),
+                                 static_cast<rapidjson::SizeType>(extension_options.s3_region.size())};
+    s3Config.AddMember("region", s3_region, allocator);
+
+    rapidjson::Value s3_endpoint{rapidjson::kNullType};
+    s3_endpoint = rapidjson::Value{extension_options.s3_endpoint.c_str(),
+                                   static_cast<rapidjson::SizeType>(extension_options.s3_endpoint.size())};
+    s3Config.AddMember("endpoint", s3_endpoint, allocator);
+
+    rapidjson::Value s3_access_key_id{rapidjson::kNullType};
+    s3_access_key_id = rapidjson::Value{extension_options.s3_access_key_id.c_str(),
+                                        static_cast<rapidjson::SizeType>(extension_options.s3_access_key_id.size())};
+    s3Config.AddMember("accessKeyId", s3_access_key_id, allocator);
+
+    rapidjson::Value s3_secret_access_key{rapidjson::kNullType};
+    s3_secret_access_key =
+        rapidjson::Value{extension_options.s3_secret_access_key.c_str(),
+                         static_cast<rapidjson::SizeType>(extension_options.s3_secret_access_key.size())};
+    s3Config.AddMember("secretAccessKey", s3_secret_access_key, allocator);
+
+    rapidjson::Value s3_session_token{rapidjson::kNullType};
+    s3_session_token = rapidjson::Value{extension_options.s3_session_token.c_str(),
+                                        static_cast<rapidjson::SizeType>(extension_options.s3_session_token.size())};
+    s3Config.AddMember("sessionToken", s3_session_token, allocator);
+
+    return s3Config;
+}
 }  // namespace io
 }  // namespace web
 }  // namespace duckdb

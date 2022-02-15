@@ -653,6 +653,7 @@ impl Shell {
                         "\r\n",
                         "{bold}Commands:{normal}\r\n",
                         ".clear                 Clear the shell.\r\n",
+                        ".examples              Example queries.\r\n",
                         ".features              Shell features.\r\n",
                         ".files list            List all files.\r\n",
                         ".files add             Add files.\r\n",
@@ -674,6 +675,26 @@ impl Shell {
                         "\r\n",
                         "{bold}Feedback:{normal}\r\n",
                         "   https://github.com/duckdb/duckdb-wasm/discussions\r\n"
+                    ),
+                    bold = vt100::MODE_BOLD,
+                    normal = vt100::MODES_OFF
+                ));
+            }),
+            ".examples" => Shell::with(|s| {
+                s.write(&format!(
+                    concat!(
+                        "\r\n",
+                        "{bold}Remote Parquet Scans:{normal}\r\n",
+                        "  SELECT count(*) FROM 'https://shell.duckdb.org/data/tpch/0_01/parquet/lineitem.parquet';\r\n",
+                        "  SELECT count(*) FROM 'https://shell.duckdb.org/data/tpch/0_01/parquet/customer.parquet';\r\n",
+                        "  SELECT avg(c_acctbal) FROM 'https://shell.duckdb.org/data/tpch/0_01/parquet/customer.parquet';\r\n",
+                        "  SELECT * FROM 'https://shell.duckdb.org/data/tpch/0_01/parquet/orders.parquet' LIMIT 10;\r\n",
+                        "\r\n",
+                        "{bold}Remote Parquet/Parquet Join:{normal}\r\n",
+                        "  SELECT n_name, avg(c_acctbal)\r\n",
+                        "  FROM 'https://shell.duckdb.org/data/tpch/0_01/parquet/customer.parquet',\r\n",
+                        "       'https://shell.duckdb.org/data/tpch/0_01/parquet/nation.parquet'\r\n",
+                        "  WHERE c_nationkey = n_nationkey GROUP BY n_name;\r\n",
                     ),
                     bold = vt100::MODE_BOLD,
                     normal = vt100::MODES_OFF
@@ -1011,7 +1032,7 @@ impl Shell {
                         });
                         Shell::highlight_input();
                     }
-                    Err(_e) => warn!("Failed to read from clipboard"),
+                    Err(e) => warn!("Failed to read from clipboard: {:?}", e.to_string()),
                 },
                 Key::Char('a') => {
                     Shell::with_mut(|s| {

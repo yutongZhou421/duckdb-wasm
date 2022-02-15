@@ -42,8 +42,8 @@ beforeAll(async () => {
     // Configure the worker
     const DUCKDB_BUNDLES = {
         mvp: {
-            mainModule: path.resolve(__dirname, './duckdb.wasm'),
-            mainWorker: path.resolve(__dirname, './duckdb-node.worker.cjs'),
+            mainModule: path.resolve(__dirname, './duckdb-mvp.wasm'),
+            mainWorker: path.resolve(__dirname, './duckdb-node-mvp.worker.cjs'),
         },
         eh: {
             mainModule: path.resolve(__dirname, './duckdb-eh.wasm'),
@@ -54,7 +54,7 @@ beforeAll(async () => {
 
     const logger = new duckdb_blocking.VoidLogger();
     db = await duckdb_blocking.createDuckDB(DUCKDB_BUNDLES, logger, duckdb_blocking.NODE_RUNTIME);
-    await db.instantiate();
+    await db.instantiate(_ => {});
 
     worker = new Worker(DUCKDB_CONFIG.mainWorker);
     adb = new duckdb.AsyncDuckDB(logger, worker);
@@ -77,6 +77,7 @@ import { testTokenization, testTokenizationAsync } from './tokenizer.test';
 import { testTableNames, testTableNamesAsync } from './tablenames.test';
 import { testUDF } from './udf.test';
 import { testRegressionAsync } from './regression';
+import { testFTS } from './fts.test';
 
 testUDF(() => db!);
 testTableNames(() => db!);
@@ -97,3 +98,4 @@ testCSVInsert(() => db!);
 testCSVInsertAsync(() => adb!);
 testTokenization(() => db!);
 testTokenizationAsync(() => adb!);
+testFTS(() => db!);

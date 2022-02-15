@@ -38,16 +38,51 @@ export enum DuckDBDataProtocol {
     BUFFER = 0,
     NATIVE = 1,
     HTTP = 3,
+    S3 = 4,
+}
+
+/** File flags for opening files*/
+export enum FileFlags {
+    //! Open file with read access
+    FILE_FLAGS_READ = 1 << 0,
+    //! Open file with write access
+    FILE_FLAGS_WRITE = 1 << 1,
+    //! Use direct IO when reading/writing to the file
+    FILE_FLAGS_DIRECT_IO = 1 << 2,
+    //! Create file if not exists, can only be used together with WRITE
+    FILE_FLAGS_FILE_CREATE = 1 << 3,
+    //! Always create a new file. If a file exists, the file is truncated. Cannot be used together with CREATE.
+    FILE_FLAGS_FILE_CREATE_NEW = 1 << 4,
+    //! Open file in append mode
+    FILE_FLAGS_APPEND = 1 << 5,
+}
+
+/** Configuration for the AWS S3 Filesystem */
+export interface S3Config {
+    region?: string;
+    endpoint?: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    sessionToken?: string;
 }
 
 /** An info for a file registered with DuckDB */
 export interface DuckDBFileInfo {
+    cacheEpoch: number;
     fileId: number;
     fileName: string;
     dataProtocol: DuckDBDataProtocol;
     dataUrl: string | null;
     dataNativeFd: number | null;
     allowFullHttpReads?: boolean;
+    s3Config?: S3Config;
+}
+
+/** Global info for all files registered with DuckDB */
+export interface DuckDBGlobalFileInfo {
+    cacheEpoch: number;
+    allowFullHttpReads?: boolean;
+    s3Config?: S3Config;
 }
 
 /** Call a function with packed response buffer */
@@ -91,7 +126,7 @@ export interface DuckDBRuntime {
     testPlatformFeature(mod: DuckDBModule, feature: number): boolean;
 
     // File APIs with dedicated file identifier
-    openFile(mod: DuckDBModule, fileId: number): void;
+    openFile(mod: DuckDBModule, fileId: number, flags: FileFlags): void;
     syncFile(mod: DuckDBModule, fileId: number): void;
     closeFile(mod: DuckDBModule, fileId: number): void;
     getLastFileModificationTime(mod: DuckDBModule, fileId: number): number;
@@ -110,14 +145,14 @@ export interface DuckDBRuntime {
     removeFile(mod: DuckDBModule, pathPtr: number, pathLen: number): void;
 
     // Call a scalar UDF function
-    callScalarUDF(mod: DuckDBModule, response: number, funcId: number, bufferPtr: number, bufferSize: number): void;
+    callScalarUDF(mod: DuckDBModule, response: number, funcId: number, descPtr: number, descSize: number, ptrsPtr: number, ptrsSize: number): void;
 }
 
 export const DEFAULT_RUNTIME: DuckDBRuntime = {
     _udfFunctions: new Map(),
 
     testPlatformFeature: (_mod: DuckDBModule, _feature: number): boolean => false,
-    openFile: (_mod: DuckDBModule, _fileId: number): void => {},
+    openFile: (_mod: DuckDBModule, _fileId: number, flags: FileFlags): void => {},
     syncFile: (_mod: DuckDBModule, _fileId: number): void => {},
     closeFile: (_mod: DuckDBModule, _fileId: number): void => {},
     getLastFileModificationTime: (_mod: DuckDBModule, _fileId: number): number => {
@@ -149,9 +184,11 @@ export const DEFAULT_RUNTIME: DuckDBRuntime = {
         mod: DuckDBModule,
         response: number,
         funcId: number,
-        bufferPtr: number,
-        bufferSize: number,
+        descPtr: number,
+        descSize: number,
+        ptrsPtr: number,
+        ptrsSize: number,
     ): void => {
-        udf_rt.callScalarUDF(DEFAULT_RUNTIME, mod, response, funcId, bufferPtr, bufferSize);
+        udf_rt.callScalarUDF(DEFAULT_RUNTIME, mod, response, funcId, descPtr, descSize, ptrsPtr, ptrsSize);
     },
 };

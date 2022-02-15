@@ -7,7 +7,7 @@ trap exit SIGINT
 PROJECT_ROOT="$(cd $(dirname "$BASH_SOURCE[0]") && cd .. && pwd)" &> /dev/null
 
 MODE=${1:-Fast}
-FEATURES=${2:-default}
+FEATURES=${2:-mvp}
 echo "MODE=${MODE}"
 
 CPP_BUILD_DIR="${PROJECT_ROOT}/lib/build/wasm/${MODE}"
@@ -20,12 +20,16 @@ ADDITIONAL_FLAGS=
 SUFFIX=
 case $MODE in
   "debug") ADDITIONAL_FLAGS="-DCMAKE_BUILD_TYPE=Debug -DWASM_FAST_LINKING=1" ;;
-  "fast") ADDITIONAL_FLAGS="-DCMAKE_BUILD_TYPE=RelWithDebInfo -DWASM_FAST_LINKING=1" ;;
-  "release") ADDITIONAL_FLAGS="-DCMAKE_BUILD_TYPE=Release" ;;
+  "dev") ADDITIONAL_FLAGS="-DCMAKE_BUILD_TYPE=RelWithDebInfo -DWASM_FAST_LINKING=1" ;;
+  "relsize") ADDITIONAL_FLAGS="-DCMAKE_BUILD_TYPE=Release -DWASM_MIN_SIZE=1" ;;
+  "relperf") ADDITIONAL_FLAGS="-DCMAKE_BUILD_TYPE=Release" ;;
    *) ;;
 esac
 case $FEATURES in
-  "default") ADDITIONAL_FLAGS="${ADDITIONAL_FLAGS}" ;;
+  "mvp")
+    ADDITIONAL_FLAGS="${ADDITIONAL_FLAGS}"
+    SUFFIX="-mvp"
+    ;;
   "eh")
     ADDITIONAL_FLAGS="${ADDITIONAL_FLAGS} -DWITH_WASM_EXCEPTIONS=1"
     SUFFIX="-eh"

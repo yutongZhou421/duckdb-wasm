@@ -1,5 +1,9 @@
+<<<<<<< HEAD
 import { AnalyzedQuery } from './analyzed_query';
 import { DuckDBConfig, DuckDBConnection, FileStatistics } from '.';
+=======
+import { DuckDBConfig, DuckDBConnection, FileStatistics, InstantiationProgress } from '.';
+>>>>>>> upstream/master
 import { CSVInsertOptions, JSONInsertOptions, ArrowInsertOptions } from './insert_options';
 import { ScriptTokens } from './tokens';
 import { WebFile } from './web_file';
@@ -8,7 +12,7 @@ import * as arrow from 'apache-arrow';
 export interface DuckDBBindings {
     open(config: DuckDBConfig): void;
     reset(): void;
-    instantiate(): Promise<this>;
+    instantiate(onProgress: (p: InstantiationProgress) => void): Promise<this>;
 
     getVersion(): string;
     getFeatureFlags(): number;

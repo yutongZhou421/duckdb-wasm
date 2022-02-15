@@ -23,8 +23,12 @@ export function testFilesystem(
     describe('File buffer registration', () => {
         const test = async () => {
             const result = await conn.send(`SELECT matrnr FROM parquet_scan('studenten.parquet');`);
-            const table = await arrow.Table.from<{ matrnr: arrow.Int }>(result);
-            expect(table.getColumnAt(0)?.toArray()).toEqual(
+            const batches = [];
+            for await (const batch of result) {
+                batches.push(batch);
+            }
+            const table = await new arrow.Table<{ matrnr: arrow.Int }>(batches);
+            expect(table.getChildAt(0)?.toArray()).toEqual(
                 new Int32Array([24002, 25403, 26120, 26830, 27550, 28106, 29120, 29555]),
             );
         };
@@ -35,11 +39,13 @@ export function testFilesystem(
             await test();
         });
         it('File buffer registered twice', async () => {
-            const students = await resolveData('/uni/studenten.parquet');
-            expect(students).not.toBeNull();
-            await db().registerFileBuffer('studenten.parquet', students!);
+            const students0 = await resolveData('/uni/studenten.parquet');
+            const students1 = await resolveData('/uni/studenten.parquet');
+            expect(students0).not.toBeNull();
+            expect(students1).not.toBeNull();
+            await db().registerFileBuffer('studenten.parquet', students0!);
             await test();
-            await db().registerFileBuffer('studenten.parquet', students!);
+            await db().registerFileBuffer('studenten.parquet', students1!);
             await test();
         });
         it('File buffer used twice', async () => {
@@ -57,8 +63,12 @@ export function testFilesystem(
             expect(students).not.toBeNull();
             await db().registerFileBuffer('studenten.parquet', students!);
             const result = await conn.send(`SELECT matrnr FROM parquet_scan('studenten.parquet');`);
-            const table = await arrow.Table.from<{ matrnr: arrow.Int }>(result);
-            expect(table.getColumnAt(0)?.toArray()).toEqual(
+            const batches = [];
+            for await (const batch of result) {
+                batches.push(batch);
+            }
+            const table = await new arrow.Table<{ matrnr: arrow.Int }>(batches);
+            expect(table.getChildAt(0)?.toArray()).toEqual(
                 new Int32Array([24002, 25403, 26120, 26830, 27550, 28106, 29120, 29555]),
             );
         });
@@ -80,13 +90,17 @@ export function testFilesystem(
                     INNER JOIN parquet_scan('hoeren.parquet') hoeren ON (students.matrnr = hoeren.matrnr)
                     INNER JOIN parquet_scan('vorlesungen.parquet') vorlesungen ON (vorlesungen.vorlnr = hoeren.vorlnr);
                 `);
-            const table = await arrow.Table.from<{ matrnr: arrow.Int; titel: arrow.Utf8 }>(result);
+            const batches = [];
+            for await (const batch of result) {
+                batches.push(batch);
+            }
+            const table = await new arrow.Table<{ matrnr: arrow.Int; titel: arrow.Utf8 }>(batches);
             expect(table.numCols).toBe(2);
             const flat = [];
             for (const row of table) {
                 flat.push({
-                    matrnr: row.matrnr,
-                    titel: row.titel?.toString(),
+                    matrnr: row?.matrnr,
+                    titel: row?.titel?.toString(),
                 });
             }
             expect(flat).toEqual([
@@ -152,8 +166,12 @@ export function testFilesystem(
             expect(url).not.toBeNull();
             await conn.query(`CREATE TABLE students4 AS SELECT * FROM parquet_scan('students3.parquet');`);
             const result = await conn.send(`SELECT matrnr FROM students4;`);
-            const table = await arrow.Table.from<{ matrnr: arrow.Int }>(result);
-            expect(table.getColumnAt(0)?.toArray()).toEqual(
+            const batches = [];
+            for await (const batch of result) {
+                batches.push(batch);
+            }
+            const table = await new arrow.Table<{ matrnr: arrow.Int }>(batches);
+            expect(table.getChildAt(0)?.toArray()).toEqual(
                 new Int32Array([24002, 25403, 26120, 26830, 27550, 28106, 29120, 29555]),
             );
         });
@@ -163,8 +181,12 @@ export function testFilesystem(
         it('Small Parquet file', async () => {
             await db().registerFileURL('studenten.parquet', `${baseDir}/uni/studenten.parquet`);
             const result = await conn.send(`SELECT matrnr FROM parquet_scan('studenten.parquet');`);
-            const table = await arrow.Table.from<{ matrnr: arrow.Int }>(result);
-            expect(table.getColumnAt(0)?.toArray()).toEqual(
+            const batches = [];
+            for await (const batch of result) {
+                batches.push(batch);
+            }
+            const table = await new arrow.Table<{ matrnr: arrow.Int }>(batches);
+            expect(table.getChildAt(0)?.toArray()).toEqual(
                 new Int32Array([24002, 25403, 26120, 26830, 27550, 28106, 29120, 29555]),
             );
         });
@@ -172,8 +194,12 @@ export function testFilesystem(
         it('Large Parquet file', async () => {
             await db().registerFileURL('lineitem.parquet', `${baseDir}/tpch/0_01/parquet/lineitem.parquet`);
             const result = await conn.send(`SELECT count(*)::INTEGER as cnt FROM parquet_scan('lineitem.parquet');`);
-            const table = await arrow.Table.from<{ cnt: arrow.Int }>(result);
-            expect(table.getColumnAt(0)?.get(0)).toBeGreaterThan(60_000);
+            const batches = [];
+            for await (const batch of result) {
+                batches.push(batch);
+            }
+            const table = await new arrow.Table<{ cnt: arrow.Int }>(batches);
+            expect(table.getChildAt(0)?.get(0)).toBeGreaterThan(60_000);
         });
     });
 
@@ -234,8 +260,8 @@ export function testFilesystem(
                 `SELECT v::integer FROM parquet_scan('/tmp/duckdbexportparquet/0_foo.parquet')`,
             );
             expect(content.nullCount).toEqual(0);
-            expect(content.length).toEqual(5);
-            expect(content.getColumnAt(0)?.toArray()).toEqual(new Int32Array([1, 2, 3, 4, 5]));
+            expect(content.numRows).toEqual(5);
+            expect(content.getChildAt(0)?.toArray()).toEqual(new Int32Array([1, 2, 3, 4, 5]));
         });
     });
 
@@ -252,8 +278,8 @@ export function testFilesystem(
             const parquet_buffer = await db().copyFileToBuffer('/tmp/duckdbcopytest.parquet');
             expect(parquet_buffer.length).not.toEqual(0);
             const content = await conn.query(`SELECT v::integer FROM parquet_scan('/tmp/duckdbcopytest.parquet')`);
-            expect(content.length).toEqual(5);
-            expect(content.getColumnAt(0)?.toArray()).toEqual(new Int32Array([1, 2, 3, 4, 5]));
+            expect(content.numRows).toEqual(5);
+            expect(content.getChildAt(0)?.toArray()).toEqual(new Int32Array([1, 2, 3, 4, 5]));
         });
     });
 }

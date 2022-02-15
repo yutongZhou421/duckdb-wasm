@@ -65,10 +65,24 @@ endif ()
 # Dedicated module?
 
 if(EMSCRIPTEN)
+  # Release build
   if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Os")
-    # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -flto")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+    # ... with min size
+    if(WASM_MIN_SIZE)
+      set(CMAKE_CXX_FLAGS_RELEASE "-Oz")
+      set(WASM_LINK_FLAGS "${WASM_LINK_FLAGS} -Oz")
+    else()
+      # ... with max performance
+      set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+      set(WASM_LINK_FLAGS "${WASM_LINK_FLAGS} -O3")
+    endif()
+  # Release build with debug symbols
+  elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    # ... with fast linking
+    if(WASM_FAST_LINKING)
+      set(WASM_LINK_FLAGS "${WASM_LINK_FLAGS} -O0")
+    endif()
+  # Debug build
   elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} \
       --profiling \
@@ -79,15 +93,11 @@ if(EMSCRIPTEN)
       -sSAFE_HEAP=1 \
       -gsource-map \
       --source-map-base=file://${CMAKE_BINARY_DIR}/ \
-      -sSEPARATE_DWARF_URL=file://${CMAKE_BINARY_DIR}/duckdb.debug.wasm")
-  endif()
-
-  if(WITH_WASM_FAST_LINKING)
-    set(WASM_LINK_FLAGS "${WASM_LINK_FLAGS} -O0")
-  else()
-    # set(WASM_LINK_FLAGS "${WASM_LINK_FLAGS} -Os")
-    # set(WASM_LINK_FLAGS "${WASM_LINK_FLAGS} -O3 -flto")
-    set(WASM_LINK_FLAGS "${WASM_LINK_FLAGS} -O3")
+      -sSEPARATE_DWARF_URL=file://${CMAKE_BINARY_DIR}/duckdb.wasm")
+    # ... with fast linking
+    if(WASM_FAST_LINKING)
+      set(WASM_LINK_FLAGS "${WASM_LINK_FLAGS} -O0")
+    endif()
   endif()
 
   if(WITH_WASM_EXCEPTIONS)
@@ -182,7 +192,7 @@ add_library(
   ${CMAKE_SOURCE_DIR}/src/arrow_type_mapping.cc
   ${CMAKE_SOURCE_DIR}/src/config.cc
   ${CMAKE_SOURCE_DIR}/src/csv_insert_options.cc
-  ${CMAKE_SOURCE_DIR}/src/ext/table_function_relation.cc
+  ${CMAKE_SOURCE_DIR}/src/functions/table_function_relation.cc
   ${CMAKE_SOURCE_DIR}/src/insert_options.cc
   ${CMAKE_SOURCE_DIR}/src/io/arrow_ifstream.cc
   ${CMAKE_SOURCE_DIR}/src/io/buffered_filesystem.cc
@@ -205,7 +215,17 @@ add_library(
   ${CMAKE_SOURCE_DIR}/src/webdb.cc
   ${CMAKE_SOURCE_DIR}/src/webdb_api.cc)
 
-target_link_libraries(duckdb_web duckdb arrow rapidjson ${THREAD_LIBS})
+add_library(
+  duckdb_web_fts
+  ${CMAKE_SOURCE_DIR}/src/extensions/fts_extension.cc)
+
+add_library(
+  duckdb_web_parquet
+  ${CMAKE_SOURCE_DIR}/src/extensions/parquet_extension.cc)
+
+target_link_libraries(duckdb_web duckdb duckdb_web_fts duckdb_web_parquet arrow rapidjson ${THREAD_LIBS})
+target_link_libraries(duckdb_web_fts duckdb duckdb_fts)
+target_link_libraries(duckdb_web_parquet duckdb duckdb_parquet)
 
 # ---------------------------------------------------------------------------
 # Emscripten
@@ -245,6 +265,7 @@ if(EMSCRIPTEN)
           _duckdb_web_flush_files, \
           _duckdb_web_fs_drop_file, \
           _duckdb_web_fs_drop_files, \
+          _duckdb_web_get_global_file_info, \
           _duckdb_web_fs_get_file_info_by_id, \
           _duckdb_web_fs_get_file_info_by_name, \
           _duckdb_web_fs_glob_add_path, \
@@ -281,6 +302,7 @@ endif()
 
 if(NOT EMSCRIPTEN)
   set(TEST_CC
+      ${CMAKE_SOURCE_DIR}/test/ast_test.cc
       ${CMAKE_SOURCE_DIR}/test/all_types_test.cc
       ${CMAKE_SOURCE_DIR}/test/arrow_casts_test.cc
       ${CMAKE_SOURCE_DIR}/test/bugs_test.cc
@@ -300,7 +322,7 @@ if(NOT EMSCRIPTEN)
       ${CMAKE_SOURCE_DIR}/test/web_filesystem_test.cc
       ${CMAKE_SOURCE_DIR}/test/webdb_test.cc
       ${CMAKE_SOURCE_DIR}/test/tester.cc)
-  set(TEST_LIBS duckdb_web gtest gmock gflags ${THREAD_LIBS})
+  set(TEST_LIBS duckdb_web duckdb_web_fts duckdb_web_parquet gtest gmock gflags ${THREAD_LIBS})
 
   add_executable(tester ${TEST_CC})
   target_link_libraries(tester ${TEST_LIBS})

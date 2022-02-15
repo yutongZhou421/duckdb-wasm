@@ -24,18 +24,21 @@ ExternalProject_Add(
              -DCMAKE_BUILD_TYPE=${DUCKDB_BUILD_TYPE}
              -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
              -DBUILD_PARQUET_EXTENSION=TRUE
+             -DBUILD_FTS_EXTENSION=TRUE
              -DBUILD_SHELL=FALSE
              -DBUILD_UNITTESTS=FALSE
+             -DDISABLE_BUILTIN_EXTENSIONS=TRUE
   BUILD_BYPRODUCTS
     <INSTALL_DIR>/lib/libduckdb_re2.a
     <INSTALL_DIR>/lib/libduckdb_static.a
-    <INSTALL_DIR>/lib/libfmt.a
-    <INSTALL_DIR>/lib/libhyperloglog.a
-    <INSTALL_DIR>/lib/libminiz.a
-    <INSTALL_DIR>/lib/libpg_query.a
-    <INSTALL_DIR>/lib/libutf8proc.a
-    <INSTALL_DIR>/lib/libfastpforlib.a
-    <INSTALL_DIR>/lib/libparquet_extension.a)
+    <INSTALL_DIR>/lib/libduckdb_fmt.a
+    <INSTALL_DIR>/lib/libduckdb_hyperloglog.a
+    <INSTALL_DIR>/lib/libduckdb_miniz.a
+    <INSTALL_DIR>/lib/libduckdb_pg_query.a
+    <INSTALL_DIR>/lib/libduckdb_utf8proc.a
+    <INSTALL_DIR>/lib/libduckdb_fastpforlib.a
+    <INSTALL_DIR>/lib/libparquet_extension.a
+    <INSTALL_DIR>/lib/libfts_extension.a)
 
 ExternalProject_Get_Property(duckdb_ep install_dir)
 ExternalProject_Get_Property(duckdb_ep binary_dir)
@@ -53,14 +56,13 @@ set_property(TARGET duckdb PROPERTY IMPORTED_LOCATION ${DUCKDB_LIBRARY_PATH})
 
 target_link_libraries(
   duckdb
-  INTERFACE ${install_dir}/lib/libparquet_extension.a
   INTERFACE ${install_dir}/lib/libduckdb_re2.a
-  INTERFACE ${install_dir}/lib/libfmt.a
-  INTERFACE ${install_dir}/lib/libhyperloglog.a
-  INTERFACE ${install_dir}/lib/libminiz.a
-  INTERFACE ${install_dir}/lib/libpg_query.a
-  INTERFACE ${install_dir}/lib/libutf8proc.a
-  INTERFACE ${install_dir}/lib/libfastpforlib.a
+  INTERFACE ${install_dir}/lib/libduckdb_fmt.a
+  INTERFACE ${install_dir}/lib/libduckdb_hyperloglog.a
+  INTERFACE ${install_dir}/lib/libduckdb_miniz.a
+  INTERFACE ${install_dir}/lib/libduckdb_pg_query.a
+  INTERFACE ${install_dir}/lib/libduckdb_utf8proc.a
+  INTERFACE ${install_dir}/lib/libduckdb_fastpforlib.a
   INTERFACE dl)
 
 target_include_directories(
@@ -72,7 +74,16 @@ target_include_directories(
   INTERFACE ${DUCKDB_SOURCE_DIR}/third_party/snappy
   INTERFACE ${DUCKDB_SOURCE_DIR}/third_party/miniz
   INTERFACE ${DUCKDB_SOURCE_DIR}/third_party/thrift
-  INTERFACE ${DUCKDB_SOURCE_DIR}/third_party/zstd
-  INTERFACE ${DUCKDB_SOURCE_DIR}/extension/parquet/include)
+  INTERFACE ${DUCKDB_SOURCE_DIR}/third_party/zstd)
+
+add_library(duckdb_fts STATIC IMPORTED)
+set_property(TARGET duckdb_fts PROPERTY IMPORTED_LOCATION ${install_dir}/lib/libfts_extension.a)
+target_include_directories(duckdb_fts INTERFACE ${DUCKDB_SOURCE_DIR}/extension/fts/include)
+
+add_library(duckdb_parquet STATIC IMPORTED)
+set_property(TARGET duckdb_parquet PROPERTY IMPORTED_LOCATION ${install_dir}/lib/libparquet_extension.a)
+target_include_directories(duckdb_parquet INTERFACE ${DUCKDB_SOURCE_DIR}/extension/parquet/include)
 
 add_dependencies(duckdb duckdb_ep)
+add_dependencies(duckdb_fts duckdb_ep)
+add_dependencies(duckdb_parquet duckdb_ep)

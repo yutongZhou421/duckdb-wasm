@@ -7,7 +7,7 @@ import {
     failWith,
     readString,
     decodeText,
-    DuckDBDataProtocol,
+    DuckDBDataProtocol, FileFlags,
 } from './runtime';
 import { StatusCode } from '../status';
 import { DuckDBModule } from './duckdb_module';
@@ -26,11 +26,13 @@ export const NODE_RUNTIME: DuckDBRuntime & {
     resolveFileInfo(mod: DuckDBModule, fileId: number): DuckDBFileInfo | null {
         try {
             const cached = NODE_RUNTIME._fileInfoCache.get(fileId);
-            if (cached) return cached;
-            const [s, d, n] = callSRet(mod, 'duckdb_web_fs_get_file_info_by_id', ['number'], [fileId]);
+            const [s, d, n] = callSRet(mod, 'duckdb_web_fs_get_file_info_by_id', ['number', 'number'], [fileId, cached?.cacheEpoch || 0]);
             if (s !== StatusCode.SUCCESS) {
                 failWith(mod, readString(mod, d, n));
                 return null;
+            } else if (n === 0) {
+                // Epoch is up to date with WASM
+                return cached!;
             }
             const infoStr = readString(mod, d, n);
             dropResponseBuffers(mod);
@@ -54,7 +56,7 @@ export const NODE_RUNTIME: DuckDBRuntime & {
         }
     },
 
-    openFile(mod: DuckDBModule, fileId: number): number {
+    openFile(mod: DuckDBModule, fileId: number, flags: FileFlags): number {
         try {
             NODE_RUNTIME._fileInfoCache.delete(fileId);
             const file = NODE_RUNTIME.resolveFileInfo(mod, fileId);
@@ -83,6 +85,7 @@ export const NODE_RUNTIME: DuckDBRuntime & {
                 }
                 // HTTP file
                 case DuckDBDataProtocol.HTTP:
+                case DuckDBDataProtocol.S3:
                     failWith(mod, 'Not implemented');
             }
         } catch (e: any) {
@@ -106,6 +109,7 @@ export const NODE_RUNTIME: DuckDBRuntime & {
                     break;
                 }
                 case DuckDBDataProtocol.HTTP:
+                case DuckDBDataProtocol.S3:
                     failWith(mod, `Not implemented`);
             }
         } catch (e: any) {
@@ -126,6 +130,7 @@ export const NODE_RUNTIME: DuckDBRuntime & {
                     break;
                 }
                 case DuckDBDataProtocol.HTTP:
+                case DuckDBDataProtocol.S3:
                     failWith(mod, `Not implemented`);
             }
         } catch (e: any) {
@@ -145,6 +150,7 @@ export const NODE_RUNTIME: DuckDBRuntime & {
                     return fs.readSync(file.dataNativeFd!, mod.HEAPU8, buf, bytes, location);
                 }
                 case DuckDBDataProtocol.HTTP:
+                case DuckDBDataProtocol.S3:
                     failWith(mod, `Not implemented`);
             }
         } catch (e: any) {
@@ -182,6 +188,7 @@ export const NODE_RUNTIME: DuckDBRuntime & {
                     return fs.fstatSync(file.dataNativeFd!).mtime.getTime();
                 }
                 case DuckDBDataProtocol.HTTP:
+                case DuckDBDataProtocol.S3:
                     failWith(mod, 'Not implemented');
             }
         } catch (e: any) {
@@ -265,10 +272,12 @@ export const NODE_RUNTIME: DuckDBRuntime & {
         mod: DuckDBModule,
         response: number,
         funcId: number,
-        bufferPtr: number,
-        bufferSize: number,
+        descPtr: number,
+        descSize: number,
+        ptrsPtr: number,
+        ptrsSize: number,
     ): void => {
-        udf.callScalarUDF(NODE_RUNTIME, mod, response, funcId, bufferPtr, bufferSize);
+        udf.callScalarUDF(NODE_RUNTIME, mod, response, funcId, descPtr, descSize, ptrsPtr, ptrsSize);
     },
 };
 

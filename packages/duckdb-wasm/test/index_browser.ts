@@ -5,8 +5,8 @@ import * as check from 'wasm-feature-detect';
 // Configure the worker
 const DUCKDB_BUNDLES: duckdb.DuckDBBundles = {
     mvp: {
-        mainModule: new URL('/static/duckdb.wasm', window.location.href).href,
-        mainWorker: new URL('/static/duckdb-browser.worker.js', window.location.href).href,
+        mainModule: new URL('/static/duckdb-mvp.wasm', window.location.href).href,
+        mainWorker: new URL('/static/duckdb-browser-mvp.worker.js', window.location.href).href,
     },
     eh: {
         mainModule: new URL('/static/duckdb-eh.wasm', window.location.href).href,
@@ -67,6 +67,8 @@ const resolveData = async (url: string) => {
             return await resolveBuffer('/uni/hoeren.parquet');
         case '/uni/vorlesungen.parquet':
             return await resolveBuffer('/uni/vorlesungen.parquet');
+        case '/tpch/0_01/parquet/lineitem.parquet':
+            return await resolveBuffer('/tpch/0_01/parquet/lineitem.parquet');
         default:
             return null;
     }
@@ -80,7 +82,7 @@ let worker: Worker | null = null;
 beforeAll(async () => {
     const logger = new duckdb_blocking.VoidLogger();
     db = await duckdb_blocking.createDuckDB(DUCKDB_BUNDLES, logger, duckdb_blocking.BROWSER_RUNTIME);
-    await db.instantiate();
+    await db.instantiate(_ => {});
 
     DUCKDB_BUNDLE = await duckdb.selectBundle(DUCKDB_BUNDLES);
     worker = await duckdb.createWorker(DUCKDB_BUNDLE!.mainWorker!);
@@ -93,6 +95,7 @@ afterAll(async () => {
 });
 
 import { testAllTypes, testAllTypesAsync } from './all_types.test';
+import { testHTTPFS, testHTTPFSAsync } from './httpfs_test';
 import { testBindings, testAsyncBindings } from './bindings.test';
 import { testBatchStream } from './batch_stream.test';
 import { testAsyncBatchStream } from './batch_stream_async.test';
@@ -108,6 +111,8 @@ import { testUDF } from './udf.test';
 const baseURL = window.location.origin;
 const dataURL = `${baseURL}/data`;
 
+testHTTPFS(() => db!);
+testHTTPFSAsync(() => adb!, resolveData, dataURL);
 testUDF(() => db!);
 testTableNames(() => db!);
 testTableNamesAsync(() => adb!);
