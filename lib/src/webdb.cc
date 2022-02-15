@@ -26,13 +26,26 @@
 #include "arrow/type_fwd.h"
 #include "duckdb.hpp"
 #include "duckdb/common/arrow.hpp"
+#include "duckdb/common/enums/expression_type.hpp"
+#include "duckdb/common/enums/statement_type.hpp"
+#include "duckdb/common/enums/tableref_type.hpp"
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/types/data_chunk.hpp"
+#include "duckdb/common/types/string_type.hpp"
 #include "duckdb/common/types/vector_buffer.hpp"
+#include "duckdb/function/table_function.hpp"
 #include "duckdb/main/query_result.hpp"
 #include "duckdb/parser/expression/constant_expression.hpp"
+#include "duckdb/parser/expression/function_expression.hpp"
 #include "duckdb/parser/parser.hpp"
+#include "duckdb/parser/query_node/select_node.hpp"
+#include "duckdb/parser/statement/select_statement.hpp"
+#include "duckdb/parser/tableref/basetableref.hpp"
+#include "duckdb/parser/tableref/crossproductref.hpp"
+#include "duckdb/parser/tableref/expressionlistref.hpp"
+#include "duckdb/parser/tableref/table_function_ref.hpp"
+#include "duckdb/parser/tokens.hpp"
 #include "duckdb/web/arrow_casts.h"
 #include "duckdb/web/arrow_insert_options.h"
 #include "duckdb/web/arrow_stream_buffer.h"
@@ -199,18 +212,86 @@ arrow::Result<std::shared_ptr<arrow::Buffer>> WebDB::Connection::FetchQueryResul
 
 arrow::Result<std::string> WebDB::Connection::AnalyzeQuery(std::string_view text) {
     try {
-        // Do arbitrary things to figure out where to run the query
-
-        // auto result = connection_.SendQuery(std::string{text});
-        // if (!result->success) {
-        //     return arrow::Status{arrow::StatusCode::ExecutionError, move(result->error)};
-        // }
         rapidjson::Document doc;
         doc.SetObject();
         auto& allocator = doc.GetAllocator();
 
-        // XXX
-        doc.AddMember("recommendedDriver", "remote", allocator);
+        std::string input = std::string(text);
+        duckdb::Parser parser;
+        parser.ParseQuery(input);
+
+        // Get the base table and run a select count(*) from table;
+        auto& stmt = *parser.statements[0];
+        // Store the table size of select count(*)
+        std::string result = "0";
+
+        if (stmt.type == duckdb::StatementType::SELECT_STATEMENT) {
+            std::cout << "A select statement" << std::endl;
+            auto select_stmt = reinterpret_cast<duckdb::SelectStatement*>(&stmt);
+            auto& query_node = *select_stmt->node;
+            if (query_node.type == duckdb::QueryNodeType::SELECT_NODE) {
+                std::cout << "type is a select node" << std::endl;
+                auto& select_node = *reinterpret_cast<duckdb::SelectNode*>(&query_node);
+                if (select_node.from_table != nullptr) {
+                    std::cout << "from table not nullptr" << std::endl;
+                    // Types of from statement
+                    // from parquet_scan("https://table")
+                    if (select_node.from_table->type == duckdb::TableReferenceType::TABLE_FUNCTION) {
+                        auto& from = *reinterpret_cast<duckdb::TableFunctionRef*>(select_node.from_table.get());
+                        auto& func = *reinterpret_cast<duckdb::FunctionExpression*>(from.function.get());
+                        std::cout << "parquet scan" << std::endl;
+                        if (func.function_name == "parquet_scan") {
+                            if (func.children[0]->type == duckdb::ExpressionType::VALUE_CONSTANT) {
+                                auto& constant = *reinterpret_cast<duckdb::ConstantExpression*>(func.children[0].get());
+                                std::string check = "select count(*) from parquet_scan('" +
+                                                    constant.value.GetValue<std::string>() + "');";
+
+                                result = connection_.Query(check)->GetValue(0, 0).ToString();
+                            }
+                        }
+                    }
+                    // from "https://table"
+                    else if (select_node.from_table->type == duckdb::TableReferenceType::BASE_TABLE) {
+                        std::cout << "there is a base table" << std::endl;
+                        auto& table = *reinterpret_cast<duckdb::BaseTableRef*>(select_node.from_table.get());
+
+                        std::string check = "select count(*) from parquet_scan('" + table.table_name + "');";
+
+                        result = connection_.Query(check)->GetValue(0, 0).ToString();
+
+                    }
+                    // from "https://table_1", "https://table_2"
+                    else if (select_node.from_table->type == duckdb::TableReferenceType::CROSS_PRODUCT) {
+                        std::cout << "cross product" << std::endl;
+                        auto& cross = *reinterpret_cast<duckdb::CrossProductRef*>(select_node.from_table.get());
+
+                        if (cross.left->type == duckdb::TableReferenceType::BASE_TABLE &&
+                            cross.right->type == duckdb::TableReferenceType::BASE_TABLE) {
+                            auto& left = *reinterpret_cast<duckdb::BaseTableRef*>(cross.left.get());
+                            auto& right = *reinterpret_cast<duckdb::BaseTableRef*>(cross.right.get());
+                            std::string check_l = "select count(*) from parquet_scan('" + left.table_name + "');";
+                            std::string check_r = "select count(*) from parquet_scan('" + right.table_name + "');";
+
+                            std::string tmp = connection_.Query(check_l)->GetValue(0, 0).ToString();
+                            result = connection_.Query(check_r)->GetValue(0, 0).ToString();
+
+                            if (std::stoi(tmp) >= std::stoi(result)) {
+                                result = tmp;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        std::cout << result << std::endl;
+
+        doc.AddMember("tableSize", rapidjson::Value(result.c_str(), allocator), allocator);
+        // dummy threshold
+        if (std::stoi(result) > 150) {
+            doc.AddMember("recommendedDriver", "remote", allocator);
+        } else {
+            doc.AddMember("recommendedDriver", "local", allocator);
+        }
 
         rapidjson::StringBuffer strbuf;
         rapidjson::Writer<rapidjson::StringBuffer> writer{strbuf};

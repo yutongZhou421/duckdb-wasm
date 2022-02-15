@@ -719,7 +719,8 @@ impl Shell {
     ) -> Result<Vec<arrow::record_batch::RecordBatch>, Box<dyn Error + Send + Sync>> {
         let client = reqwest::Client::new();
         let data = client
-            .post("https://infinite-temple-10884.herokuapp.com/https://15c7-212-204-102-90.ngrok.io/invoke/01FQNF4HW2NG8G00GZJ0000007")
+            // .post("https://infinite-temple-10884.herokuapp.com/https://4567-212-204-102-90.ngrok.io/invoke/01FQNF4HW2NG8G00GZJ0000007")
+            .post("http://localhost:8080/invoke/01FQNF4HW2NG8G00GZJ0000007")
             .header("X-Requested-With", "XMLHttpRequest")
             .body(text.to_string())
             .send()
@@ -787,12 +788,16 @@ impl Shell {
         let result: Result<Vec<arrow::record_batch::RecordBatch>, String> =
             match query.recommended_driver.as_str() {
                 "remote" => {
+                    let tb_size = std::format!("table size = {}", query.table_size.as_str());
+                    Shell::with_mut(|s| s.writeln(&tb_size));
                     Shell::with_mut(|s| s.writeln("running query on remote"));
                     Shell::run_query_remotely(&text)
                         .await
                         .map_err(|e| e.to_string())
                 }
                 _ => {
+                    let tb_size = std::format!("table size = {}", query.table_size.as_str());
+                    Shell::with_mut(|s| s.writeln(&tb_size));
                     Shell::with_mut(|s| s.writeln("running query locally"));
                     conn.run_query(&text).await.map_err(|e| e.message().into())
                 }
